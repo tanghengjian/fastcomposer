@@ -104,10 +104,13 @@ class DemoDataset(object):
         return clean_input_ids.unsqueeze(0), noun_phrase_end_mask.unsqueeze(0)
 
     def prepare_data(self):
+        print(f"test,prepare_data")
         object_pixel_values = []
         image_ids = []
 
         for image_id in self.image_ids:
+            print(f"self.test_reference_folder:{self.test_reference_folder}")
+            print(f"image_id:{image_id}")
             reference_image_path = sorted(
                 glob.glob(os.path.join(self.test_reference_folder, image_id, "*.jpg"))
                 + glob.glob(os.path.join(self.test_reference_folder, image_id, "*.png"))
@@ -138,7 +141,12 @@ class DemoDataset(object):
         object_pixel_values = object_pixel_values.to(
             memory_format=torch.contiguous_format
         ).float()
-
+        
+        print(f"input_ids:{input_ids}")
+        print(f"image_token_mask:{image_token_mask}")
+        print(f"image_token_idx:{image_token_idx}")
+        print(f"image_token_idx_mask:{image_token_idx_mask}")
+        print(f"object_pixel_values.shape:{object_pixel_values.shape}")
         return {
             "input_ids": input_ids,
             "image_token_mask": image_token_mask,

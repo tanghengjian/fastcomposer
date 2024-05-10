@@ -221,6 +221,7 @@ def get_test_transforms_with_segmap(args):
 
 
 def get_object_transforms(args):
+    print(f"test,get_object_transforms:{args}")
     if args.no_object_augmentation:
         pre_augmentations = []
         augmentations = []
@@ -293,6 +294,7 @@ def get_test_object_transforms(args):
 
 
 def get_object_processor(args):
+    print(f"test,get_object_processor,args.object_background_processor:{args.object_background_processor}")
     if args.object_background_processor == "random":
         object_processor = RandomSegmentProcessor()
     else:
