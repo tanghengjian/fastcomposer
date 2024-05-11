@@ -70,6 +70,7 @@ class DemoDataset(object):
         return self.prepare_data()
 
     def _tokenize_and_mask_noun_phrases_ends(self, caption):
+
         input_ids = self.tokenizer.encode(caption)
 
         noun_phrase_end_mask = [False for _ in input_ids]
@@ -163,6 +164,7 @@ class FastComposerDataset(torch.utils.data.Dataset):
         self,
         root,
         tokenizer,
+        tokenizer_2,
         train_transforms,
         object_transforms,
         object_processor,
@@ -180,6 +182,7 @@ class FastComposerDataset(torch.utils.data.Dataset):
     ):
         self.root = root
         self.tokenizer = tokenizer
+        self.tokenizer_2 = tokenizer_2
         self.train_transforms = train_transforms
         self.object_transforms = object_transforms
         self.object_processor = object_processor
@@ -235,6 +238,7 @@ class FastComposerDataset(torch.utils.data.Dataset):
         return len(self.image_ids)
 
     def _tokenize_and_mask_noun_phrases_ends(self, caption, segments):
+        self.prompt=caption
         for segment in reversed(segments):
             end = segment["end"]
             caption = caption[:end] + self.image_token + caption[end:]
@@ -284,7 +288,7 @@ class FastComposerDataset(torch.utils.data.Dataset):
                 if segment["coco_label"] in self.object_types
             ]
 
-        pixel_values, transformed_segmap = self.train_transforms(image, segmap)
+        pixel_values, transformed_segmap,original_size,crop_size = self.train_transforms(image, segmap)
 
         object_pixel_values = []
         object_segmaps = []
@@ -368,6 +372,9 @@ class FastComposerDataset(torch.utils.data.Dataset):
             "object_segmaps": object_segmaps,
             "num_objects": torch.tensor(num_objects),
             "image_ids": torch.tensor(image_id),
+            "original_size":original_size,
+            "target_size":crop_size,
+            "prompt":caption,
         }
 
     def __getitem__(self, idx):
@@ -407,6 +414,12 @@ def collate_fn(examples):
     object_segmaps = torch.stack([example["object_segmaps"] for example in examples])
 
     num_objects = torch.stack([example["num_objects"] for example in examples])
+
+    original_size = torch.stack([example["original_size"] for example in examples])
+    target_size = torch.stack([example["target_size"] for example in examples])
+    prompt = [example["prompt"] for example in examples]
+    print(f"test,prompt:{prompt}")
+
     return {
         "pixel_values": pixel_values,
         "input_ids": input_ids,
@@ -417,6 +430,9 @@ def collate_fn(examples):
         "object_segmaps": object_segmaps,
         "num_objects": num_objects,
         "image_ids": image_ids,
+        "original_size":original_size,
+        "target_size":target_size,
+        "prompt":prompt,
     }
 
 

@@ -141,17 +141,27 @@ class TrainTransformWithSegmap(torch.nn.Module):
         self.crop = CenterCropOrPadSides()
 
     def forward(self, image, segmap):
+
+        _, original_h, original_w = image.shape
+        original_size = torch.tensor([original_h, original_w])
+
         image = self.image_resize(image)
         segmap = segmap.unsqueeze(0)
         segmap = self.segmap_resize(segmap)
         image_and_segmap = torch.cat([image, segmap], dim=0)
+
         image_and_segmap = self.flip(image_and_segmap)
         image_and_segmap = self.crop(image_and_segmap)
+
+        _, crop_h, crop_w = image_and_segmap.shape
+        crop_size = torch.tensor([crop_h, crop_w])
+
+
         image = image_and_segmap[:3]
         segmap = image_and_segmap[3:]
         image = (image.float() / 127.5) - 1
         segmap = segmap.squeeze(0)
-        return image, segmap
+        return image, segmap,original_size,crop_size
 
 
 class TestTransformWithSegmap(torch.nn.Module):

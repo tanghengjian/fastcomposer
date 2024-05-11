@@ -1,13 +1,15 @@
 #CAPTION="a man <|image|> and a man <|image|> are reading book together"
 #DEMO_NAME="newton_einstein"
-CAPTION="a man <|image|> and a man <|image|> and a man <|image|> are reading book together"
-DEMO_NAME="3man"
-
+#CAPTION="a man <|image|> and a man <|image|> and a man <|image|> are reading book together"
+CAPTION="a man <|image|> and woman <|image|> standing next to each other in a room"
+DEMO_NAME="man_woman"
+#finetuned_model_path_name="model/fastcomposer"
+finetuned_model_path_name="models/stable-diffusion-v1-5/train_test"
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --mixed_precision=fp16 \
     fastcomposer/inference.py \
     --pretrained_model_name_or_path model/runwayml/stable-diffusion-v1-5 \
-    --finetuned_model_path model/fastcomposer \
+    --finetuned_model_path ${finetuned_model_path_name} \
     --test_reference_folder data/${DEMO_NAME} \
     --test_caption "${CAPTION}" \
     --output_dir outputs/${DEMO_NAME} \
@@ -17,8 +19,8 @@ CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --num_image_tokens 1 \
     --max_num_objects 3 \
     --object_resolution 224 \
-    --generate_height 960 \
-    --generate_width 768 \
+    --generate_height 512 \
+    --generate_width 512 \
     --num_images_per_prompt 1 \
     --num_rows 1 \
     --seed 42 \

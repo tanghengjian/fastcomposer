@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from diffusers import AutoencoderKL, StableDiffusionPipeline, UNet2DConditionModel
-from transformers import CLIPTextModel
+from diffusers import AutoencoderKL, StableDiffusionXLPipeline, UNet2DConditionModel
+from transformers import CLIPTextModel,CLIPTextModelWithProjection, CLIPTokenizer
 import torch.nn.functional as F
 from typing import Any, Optional, Tuple, Union, Dict, List
 from transformers.modeling_outputs import BaseModelOutputWithPooling
@@ -283,7 +283,9 @@ def unet_store_cross_attention_scores(unet, attention_scores, layers=5):
         AttnProcessor,
         AttnProcessor2_0,
     )
-
+    
+    # sd1.5
+    '''
     UNET_LAYER_NAMES = [
         "down_blocks.0",
         "down_blocks.1",
@@ -293,7 +295,16 @@ def unet_store_cross_attention_scores(unet, attention_scores, layers=5):
         "up_blocks.2",
         "up_blocks.3",
     ]
+    '''
 
+    # sdxl
+    UNET_LAYER_NAMES = [
+        "down_blocks.1",
+        "down_blocks.2",
+        "mid_block",
+        "up_blocks.0",
+        "up_blocks.1",
+    ]
     start_layer = (len(UNET_LAYER_NAMES) - layers) // 2
     end_layer = start_layer + layers
     applicable_layers = UNET_LAYER_NAMES[start_layer:end_layer]
@@ -416,7 +427,7 @@ def get_object_localization_loss(
 
 
 class FastComposerModel(nn.Module):
-    def __init__(self, text_encoder, image_encoder, vae, unet, args):
+    def __init__(self, text_encoder, text_encoder_2,tokenizer_2,image_encoder, vae, unet, args):
         super().__init__()
         self.text_encoder = text_encoder
         self.image_encoder = image_encoder
@@ -446,7 +457,8 @@ class FastComposerModel(nn.Module):
                 args.object_localization_threshold,
                 args.object_localization_normalize,
             )
-
+        self.text_encoder_2 = text_encoder_2
+        self.tokenizer_2 = tokenizer_2
     def _clear_cross_attention_scores(self):
         if hasattr(self, "cross_attention_scores"):
             keys = list(self.cross_attention_scores.keys())
@@ -474,10 +486,15 @@ class FastComposerModel(nn.Module):
             args.image_encoder_name_or_path,
         )
 
-        return FastComposerModel(text_encoder, image_encoder, vae, unet, args)
+        text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder_2")          
+
+        tokenizer_2 = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer_2")       
+
+
+        return FastComposerModel(text_encoder, text_encoder_2,tokenizer_2,image_encoder, vae, unet, args)
 
     def to_pipeline(self):
-        pipe = StableDiffusionPipeline.from_pretrained(
+        pipe = StableDiffusionXLPipeline.from_pretrained(
             self.pretrained_model_name_or_path,
             revision=self.revision,
             non_ema_revision=self.non_ema_revision,
@@ -499,7 +516,9 @@ class FastComposerModel(nn.Module):
         image_token_mask = batch["image_token_mask"]
         object_pixel_values = batch["object_pixel_values"]
         num_objects = batch["num_objects"]
-
+        
+        prompt = batch["prompt"]
+        
         vae_dtype = self.vae.parameters().__next__().dtype
         vae_input = pixel_values.to(vae_dtype)
 
@@ -528,6 +547,20 @@ class FastComposerModel(nn.Module):
             0
         ]  # (bsz, seq_len, dim)
 
+
+        text_input_ids_2 = self.tokenizer_2(
+            prompt,
+            max_length=self.tokenizer_2.model_max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        ).input_ids
+
+        encoder_output_2 = self.text_encoder_2(text_input_ids_2.to(latents.device), output_hidden_states=True)
+        pooled_text_embeds = encoder_output_2[0]
+
+        #encoder_output_2 = text_encoder_2(batch['text_input_ids_2'].to(accelerator.device), output_hidden_states=True)
+
         encoder_hidden_states = self.postfuse_module(
             encoder_hidden_states,
             object_embeds,
@@ -544,8 +577,44 @@ class FastComposerModel(nn.Module):
             raise ValueError(
                 f"Unknown prediction type {noise_scheduler.config.prediction_type}"
             )
+        
+        
+        # add cond
+        
+        original_size=batch["original_size"]
+        crop_coords_top_left=batch["target_size"]
+        target_size=batch["target_size"]
 
-        pred = self.unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        print(f"original_size:{original_size},crop_coords_top_left:{crop_coords_top_left},target_size:{target_size}")
+
+
+
+        add_time_ids = [
+            batch["original_size"].to(latents.device),
+            batch["target_size"].to(latents.device),
+            batch["target_size"].to(latents.device),
+        ]
+        #print(f"test,00,add_time_ids.shape:{add_time_ids.shape}")
+        add_time_ids = torch.cat(add_time_ids, dim=1).to(latents.device,dtype=torch.float16)
+        print(f"test,11,add_time_ids.shape:{add_time_ids.shape}")
+        
+
+        print(f"test,11,encoder_hidden_states.shape:{encoder_hidden_states.shape}")
+        print(f"test,11,pooled_text_embeds.shape:{pooled_text_embeds.shape}")
+
+        
+        text_embeds_2 = encoder_output_2.hidden_states[-2]
+        print(f"test,text_embeds_2.shape:{text_embeds_2.shape}")
+        encoder_hidden_states = torch.concat([encoder_hidden_states, text_embeds_2], dim=-1) # concat
+        print(f"test,encoder_hidden_states.shape:{encoder_hidden_states.shape}")
+
+        #text = text.reshape((add_time_ids.shape[0], -1))
+        #text_embeds = torch.from_numpy(np.asarray(0))
+        #text_embeds=text_embeds.to(latents.device)
+        unet_added_cond_kwargs = {"text_embeds": pooled_text_embeds, "time_ids": add_time_ids}
+        # torch.as_tensor(add_time_ids)
+
+        pred = self.unet(noisy_latents, timesteps, encoder_hidden_states,added_cond_kwargs=unet_added_cond_kwargs).sample
 
         if self.mask_loss and torch.rand(1) < self.mask_loss_prob:
             object_segmaps = batch["object_segmaps"]
@@ -582,3 +651,4 @@ class FastComposerModel(nn.Module):
 
         return_dict["loss"] = loss
         return return_dict
+

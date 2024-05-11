@@ -49,12 +49,12 @@ logger = get_logger(__name__)
 
 def train():
     args = parse_args()
-
+    args.pretrained_model_name_or_path=f"model/wangqixun/YamerMIX_v8"
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
-        logging_dir=args.logging_dir,
+        project_dir=args.logging_dir,
     )
 
     # Handle the repository creation
@@ -105,6 +105,9 @@ def train():
         subfolder="tokenizer",
         revision=args.revision,
     )
+
+    tokenizer_2 = CLIPTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer_2")       
+
 
     model = FastComposerModel.from_pretrained(args)
 
@@ -221,6 +224,7 @@ def train():
     train_dataset = FastComposerDataset(
         args.dataset_name,
         tokenizer,
+        tokenizer_2,
         train_transforms,
         object_transforms,
         object_processor,
