@@ -3,7 +3,7 @@ from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionS
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipeline
 from diffusers.models import AutoencoderKL, UNet2DConditionModel
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union,Tuple
 from diffusers.schedulers import KarrasDiffusionSchedulers
 from transformers import CLIPImageProcessor, CLIPTokenizer
 from fastcomposer.transforms import PadToSquare
@@ -12,6 +12,9 @@ from collections import OrderedDict
 from PIL import Image 
 import numpy as np 
 import torch
+from diffusers.image_processor import PipelineImageInput
+
+from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipelineOutput
 
 class StableDiffusionFastCompposerPipeline(StableDiffusionPipeline):
     r"""
@@ -374,39 +377,75 @@ class StableDiffusionFastCompposerPipeline(StableDiffusionPipeline):
 def stable_diffusion_call_with_references_delayed_conditioning(
     self,
     prompt: Union[str, List[str]] = None,
+    prompt_2: Optional[Union[str, List[str]]] = None,
+    image: PipelineImageInput = None,
     height: Optional[int] = None,
     width: Optional[int] = None,
     num_inference_steps: int = 50,
     guidance_scale: float = 7.5,
     negative_prompt: Optional[Union[str, List[str]]] = None,
+    negative_prompt_2: Optional[Union[str, List[str]]] = None,
     num_images_per_prompt: Optional[int] = 1,
     eta: float = 0.0,
     generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
     latents: Optional[torch.FloatTensor] = None,
     prompt_embeds: Optional[torch.FloatTensor] = None,
+    text_embeds_2:Optional[torch.FloatTensor] = None,
     prompt_embeds_text_only: Optional[torch.FloatTensor] = None,
     negative_prompt_embeds: Optional[torch.FloatTensor] = None,
+    pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
     output_type: Optional[str] = "pil",
     return_dict: bool = True,
     callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
     callback_steps: int = 1,
     cross_attention_kwargs: Optional[Dict[str, Any]] = None,
     start_merge_step=0,
+    original_size: Optional[Tuple[int, int]] = None,
+    crops_coords_top_left: Tuple[int, int] = (0, 0),
+    target_size: Optional[Tuple[int, int]] = None,
 ):
     # 0. Default height and width to unet
     height = height or self.unet.config.sample_size * self.vae_scale_factor
     width = width or self.unet.config.sample_size * self.vae_scale_factor
+    
 
+    original_size = original_size or (height, width)
+    target_size = target_size or (height, width)
+
+    print(f"height:{height},width:{width}")
+    
+    #get pooled_prompt_embeds
+    '''
+    (
+    _,
+    _,
+    pooled_prompt_embeds,
+    _,
+    ) = self.encode_prompt(
+    prompt,
+    num_images_per_prompt=num_images_per_prompt,
+    do_classifier_free_guidance=True,
+    negative_prompt=negative_prompt,
+    )
+    print(f"00,pooled_prompt_embeds.shape:{pooled_prompt_embeds.shape}")
+    '''
+
+
+    '''
     # 1. Check inputs. Raise error if not correct
     self.check_inputs(
         prompt,
+        prompt_2,
         height,
         width,
         callback_steps,
         negative_prompt,
+        negative_prompt_2,
         prompt_embeds,
         negative_prompt_embeds,
+        pooled_prompt_embeds,
     )
+    '''
 
     # 2. Define call parameters
     if prompt is not None and isinstance(prompt, str):
@@ -425,6 +464,7 @@ def stable_diffusion_call_with_references_delayed_conditioning(
     assert do_classifier_free_guidance
 
     # 3. Encode input prompt
+    '''
     prompt_embeds = self._encode_prompt(
         prompt,
         device,
@@ -434,8 +474,48 @@ def stable_diffusion_call_with_references_delayed_conditioning(
         prompt_embeds=prompt_embeds,
         negative_prompt_embeds=negative_prompt_embeds,
     )
+    '''
 
-    prompt_embeds = torch.cat([prompt_embeds, prompt_embeds_text_only], dim=0)
+    
+    print(f"prompt_embeds.shape:{prompt_embeds.shape}")
+    (
+    prompt_embeds,
+    negative_prompt_embeds,
+    _,
+    negative_pooled_prompt_embeds,
+    ) = self.encode_prompt(
+    prompt,
+    num_images_per_prompt=num_images_per_prompt,
+    do_classifier_free_guidance=do_classifier_free_guidance,
+    negative_prompt=negative_prompt,
+    prompt_embeds=prompt_embeds,
+    negative_prompt_embeds=negative_prompt_embeds,
+    pooled_prompt_embeds=pooled_prompt_embeds,
+    )
+    
+    print(f"11prompt_embeds.shape:{prompt_embeds.shape}")
+    print(f"11pooled_prompt_embeds.shape:{pooled_prompt_embeds.shape}")
+    print(f"11prompt_embeds_text_only.shape:{prompt_embeds_text_only.shape}")
+    prompt_embeds = torch.cat([prompt_embeds, text_embeds_2], dim=0)
+
+    
+    '''
+    # 1. Check inputs. Raise error if not correct
+    self.check_inputs(
+        prompt,
+        prompt_2,
+        height,
+        width,
+        callback_steps,
+        negative_prompt,
+        negative_prompt_2,
+        None,
+        negative_prompt_embeds,
+        pooled_prompt_embeds,
+        negative_pooled_prompt_embeds,
+    )
+    '''
+
 
     # 4. Prepare timesteps
     self.scheduler.set_timesteps(num_inference_steps, device=device)
@@ -455,11 +535,46 @@ def stable_diffusion_call_with_references_delayed_conditioning(
     )
 
     extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
+
+    '''
     (
         null_prompt_embeds,
         augmented_prompt_embeds,
         text_prompt_embeds,
     ) = prompt_embeds.chunk(3)
+    '''
+    null_prompt_embeds = negative_prompt_embeds 
+    augmented_prompt_embeds = prompt_embeds
+    text_prompt_embeds = prompt_embeds_text_only
+
+    if self.text_encoder_2 is None:
+        text_encoder_projection_dim = int(pooled_prompt_embeds.shape[-1])
+    else:
+        text_encoder_projection_dim = self.text_encoder_2.config.projection_dim
+    
+    '''
+    add_time_ids = self._get_add_time_ids(
+        original_size,
+        crops_coords_top_left,
+        target_size,
+        dtype=prompt_embeds.dtype,
+        text_encoder_projection_dim=text_encoder_projection_dim,
+    )
+    add_time_ids = add_time_ids.to(device)
+    '''
+
+    original_size = torch.tensor([512, 752])
+    crop_coords_top_left = torch.tensor([512, 512])
+    target_size = torch.tensor([512, 512])
+
+    add_time_ids = [
+        torch.stack([original_size]).to(latents.device),
+        torch.stack([crop_coords_top_left]).to(latents.device),
+        torch.stack([target_size]).to(latents.device),
+    ]
+    #print(f"test,00,add_time_ids.shape:{add_time_ids.shape}")
+    add_time_ids = torch.cat(add_time_ids, dim=1).to(latents.device,dtype=torch.float16)
+    print(f"test,11,add_time_ids.shape:{add_time_ids.shape}")
 
     # 7. Denoising loop
     num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
@@ -479,12 +594,16 @@ def stable_diffusion_call_with_references_delayed_conditioning(
                     [null_prompt_embeds, augmented_prompt_embeds], dim=0
                 )
 
+
+            unet_added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
+
             # predict the noise residual
             noise_pred = self.unet(
                 latent_model_input,
                 t,
                 encoder_hidden_states=current_prompt_embeds,
                 cross_attention_kwargs=cross_attention_kwargs,
+                added_cond_kwargs=unet_added_cond_kwargs,
             ).sample
 
             # perform guidance
@@ -508,37 +627,77 @@ def stable_diffusion_call_with_references_delayed_conditioning(
                 progress_bar.update()
                 if callback is not None and i % callback_steps == 0:
                     callback(i, t, latents)
+    
 
     if output_type == "latent":
         image = latents
         has_nsfw_concept = None
     elif output_type == "pil":
         # 8. Post-processing
-        image = self.decode_latents(latents)
+        #image = self.decode_latents(latents)
 
+
+        latents = 1 / self.vae.config.scaling_factor * latents
+        image = self.vae.decode(latents, return_dict=False)[0]
+        #image = (image / 2 + 0.5).clamp(0, 1)
+        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
+        #image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        #return image
+
+
+      
         # 9. Run safety checker
+        '''
         image, has_nsfw_concept = self.run_safety_checker(
             image, device, prompt_embeds.dtype
         )
+        '''
+        '''
+        safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(
+        "cuda"
+        )
+        np_image = [np.array(val) for val in image]
+        image, has_nsfw_concept = self.safety_checker(
+            images=np_image,
+            clip_input=safety_checker_input.pixel_values.to(torch.float16),
+        )
+        '''
 
         # 10. Convert to PIL
-        image = self.numpy_to_pil(image)
+        #image = self.numpy_to_pil(image)
+        image = self.image_processor.postprocess(image, output_type=output_type)
+
     else:
         # 8. Post-processing
-        image = self.decode_latents(latents)
+        #image = self.decode_latents(latents)
+        latents = 1 / self.vae.config.scaling_factor * latents
+        image = self.vae.decode(latents, return_dict=False)[0]
+        #image = (image / 2 + 0.5).clamp(0, 1)
+        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
+        #image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
+        '''
         # 9. Run safety checker
-        image, has_nsfw_concept = self.run_safety_checker(
-            image, device, prompt_embeds.dtype
+        safety_checker_input = self.feature_extractor(image, return_tensors="pt").to(
+        "cuda"
         )
+        np_image = [np.array(val) for val in image]
+        image, has_nsfw_concept = self.safety_checker(
+            images=np_image,
+            clip_input=safety_checker_input.pixel_values.to(torch.float16),
+        )
+        '''
 
     # Offload last model to CPU
     if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
         self.final_offload_hook.offload()
 
     if not return_dict:
-        return (image, has_nsfw_concept)
+        #return (image, has_nsfw_concept)
+        return (image,)
 
-    return StableDiffusionPipelineOutput(
-        images=image, nsfw_content_detected=has_nsfw_concept
+    return StableDiffusionXLPipelineOutput(
+        #images=image, nsfw_content_detected=has_nsfw_concept
+        images=image
+
     )

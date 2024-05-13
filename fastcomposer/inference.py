@@ -1,7 +1,7 @@
 from fastcomposer.transforms import get_object_transforms
 from fastcomposer.data import DemoDataset
 from fastcomposer.model import FastComposerModel
-from diffusers import StableDiffusionPipeline
+from diffusers import StableDiffusionPipeline,StableDiffusionXLPipeline
 from transformers import CLIPTokenizer
 from accelerate.utils import set_seed
 from fastcomposer.utils import parse_args
@@ -22,6 +22,7 @@ import os
 @torch.no_grad()
 def main():
     args = parse_args()
+    args.pretrained_model_name_or_path=f"model/wangqixun/YamerMIX_v8"
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
     )
@@ -42,14 +43,14 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
-    pipe = StableDiffusionPipeline.from_pretrained(
+    pipe = StableDiffusionXLPipeline.from_pretrained(
         args.pretrained_model_name_or_path, torch_dtype=weight_dtype
     )
 
     model = FastComposerModel.from_pretrained(args)
 
     ckpt_name = "pytorch_model.bin"
-
+    print(f"args.finetuned_model_path:{args.finetuned_model_path}")
     model.load_state_dict(
         torch.load(Path(args.finetuned_model_path) / ckpt_name, map_location="cpu")
     )
@@ -130,13 +131,33 @@ def main():
     encoder_hidden_states = pipe.text_encoder(
         input_ids, image_token_mask, object_embeds, num_objects
     )[0]
+    
 
-    encoder_hidden_states_text_only = pipe._encode_prompt(
+
+    print(f"test,prompt_text_only:{prompt_text_only}")
+    encoder_hidden_states_text_only,_,pooled_text_embeds0,_ = pipe.encode_prompt(
         prompt_text_only,
+        None,
         accelerator.device,
         args.num_images_per_prompt,
         do_classifier_free_guidance=False,
     )
+    print(f"test,encoder_hidden_states_text_only.shape:{encoder_hidden_states_text_only.shape},pooled_text_embeds0.shape:{pooled_text_embeds0.shape}")
+
+
+    text_input_ids_2 = pipe.tokenizer_2(
+        prompt_text_only,
+        max_length=pipe.tokenizer_2.model_max_length,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt"
+    ).input_ids
+
+    encoder_output_2 = pipe.text_encoder_2(text_input_ids_2.to(accelerator.device), output_hidden_states=True)
+    pooled_text_embeds = encoder_output_2[0]
+    text_embeds_2 = encoder_output_2.hidden_states[-2]
+    print(f"test,text_embeds_2.shape:{text_embeds_2.shape},pooled_text_embeds.shape:{pooled_text_embeds.shape}")
+
 
     encoder_hidden_states = pipe.postfuse_module(
         encoder_hidden_states,
@@ -144,10 +165,19 @@ def main():
         image_token_mask,
         num_objects,
     )
+    print(f"test,00,encoder_hidden_states.shape:{encoder_hidden_states.shape}")
+
+
+    #encoder_hidden_states = torch.concat([encoder_hidden_states, text_embeds_2], dim=-1) # concat
+
+    print(f"test,11,encoder_hidden_states.shape:{encoder_hidden_states.shape}")
 
     cross_attention_kwargs = {}
-
+    
+    #prompt_embeds 携带了image信息
+    #prompt_embeds_text_only只有原始文本信息
     images = pipe.inference(
+        #prompt=prompt_text_only,
         prompt_embeds=encoder_hidden_states,
         num_inference_steps=args.inference_steps,
         height=args.generate_height,
@@ -157,6 +187,8 @@ def main():
         cross_attention_kwargs=cross_attention_kwargs,
         prompt_embeds_text_only=encoder_hidden_states_text_only,
         start_merge_step=args.start_merge_step,
+        pooled_prompt_embeds = pooled_text_embeds,
+        text_embeds_2 = text_embeds_2,
     ).images
 
     for instance_id in range(args.num_images_per_prompt):

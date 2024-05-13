@@ -1,4 +1,4 @@
-export WANDB_NAME=postfuse-localize-ffhq-1_5-1e-5
+export WANDB_NAME=sdxl
 export WANDB_DISABLE_SERVICE=true
 export CUDA_VISIBLE_DEVICES="0"
 
