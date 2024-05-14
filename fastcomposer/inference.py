@@ -144,6 +144,8 @@ def main():
     )
     print(f"test,encoder_hidden_states_text_only.shape:{encoder_hidden_states_text_only.shape},pooled_text_embeds0.shape:{pooled_text_embeds0.shape}")
 
+    #print(f"test,negative_prompt_embeds0.shape:{negative_prompt_embeds0.shape},negative_pooled_prompt_embeds0.shape:{negative_pooled_prompt_embeds0.shape}")
+
 
     text_input_ids_2 = pipe.tokenizer_2(
         prompt_text_only,

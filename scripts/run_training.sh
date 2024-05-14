@@ -12,7 +12,7 @@ DATASET_NAME="train_test"
 FAMILY="wangqixun"
 MODEL="YamerMIX_v8"
 IMAGE_ENCODER=openai/clip-vit-large-patch14
-
+#15000
 accelerate launch \
     --mixed_precision=fp16 \
     fastcomposer/train.py \
@@ -20,12 +20,12 @@ accelerate launch \
     --dataset_name ${DATASET_PATH} \
     --logging_dir logs/${MODEL}/${DATASET_NAME}/${WANDB_NAME} \
     --output_dir models/${MODEL}/${DATASET_NAME}/${WANDB_NAME} \
-    --max_train_steps 15000 \
-    --num_train_epochs 15000 \
+    --max_train_steps 15 \
+    --num_train_epochs 15 \
     --train_batch_size 16 \
     --learning_rate 1e-5 \
     --unet_lr_scale 1.0 \
-    --checkpointing_steps 200 \
+    --checkpointing_steps 10 \
     --mixed_precision fp16 \
     --allow_tf32 \
     --keep_only_last_checkpoint \

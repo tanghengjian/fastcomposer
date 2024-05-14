@@ -477,7 +477,7 @@ def stable_diffusion_call_with_references_delayed_conditioning(
     '''
 
     
-    print(f"prompt_embeds.shape:{prompt_embeds.shape}")
+    print(f"00,prompt_embeds.shape:{prompt_embeds.shape},prompt_embeds:{prompt_embeds}")
     (
     prompt_embeds,
     negative_prompt_embeds,
@@ -493,10 +493,22 @@ def stable_diffusion_call_with_references_delayed_conditioning(
     pooled_prompt_embeds=pooled_prompt_embeds,
     )
     
-    print(f"11prompt_embeds.shape:{prompt_embeds.shape}")
+    print(f"11prompt_embeds.shape:{prompt_embeds.shape},prompt_embeds:{prompt_embeds}")
     print(f"11pooled_prompt_embeds.shape:{pooled_prompt_embeds.shape}")
     print(f"11prompt_embeds_text_only.shape:{prompt_embeds_text_only.shape}")
-    prompt_embeds = torch.cat([prompt_embeds, text_embeds_2], dim=0)
+    print(f"11negative_pooled_prompt_embeds.shape:{negative_pooled_prompt_embeds.shape}")
+    print(f"11negative_prompt_embeds.shape:{negative_prompt_embeds.shape}")
+    #prompt_embeds = torch.cat([prompt_embeds, text_embeds_2], dim=0)
+    prompt_embeds = torch.concat([prompt_embeds, text_embeds_2], dim=-1) # concat
+    print(f"22prompt_embeds.shape:{prompt_embeds.shape}")
+    #negative_prompt_embeds = torch.concat([negative_prompt_embeds, negative_pooled_prompt_embeds], dim=-1) # concat
+    
+
+    # 将张量扩展为[1, 77, 1280]
+    expanded_tensor1 = negative_pooled_prompt_embeds.unsqueeze(1).expand(-1, 77, -1)
+
+    # 连接两个张量，得到形状为[1, 77, 2048]的结果
+    negative_prompt_embeds = torch.cat([negative_prompt_embeds, expanded_tensor1], dim=2)
 
     
     '''
@@ -523,6 +535,9 @@ def stable_diffusion_call_with_references_delayed_conditioning(
 
     # 5. Prepare latent variables
     num_channels_latents = self.unet.in_channels
+    print(f"test,00,num_channels_latents:{num_channels_latents}")
+    num_channels_latents = self.unet.config.in_channels
+    print(f"test,11,num_channels_latents:{num_channels_latents}")
     latents = self.prepare_latents(
         batch_size * num_images_per_prompt,
         num_channels_latents,
@@ -584,19 +599,21 @@ def stable_diffusion_call_with_references_delayed_conditioning(
                 torch.cat([latents] * 2) if do_classifier_free_guidance else latents
             )
             latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
-
+            print(f"test,latent_model_input.shape:{latent_model_input.shape}")
             if i <= start_merge_step:
                 current_prompt_embeds = torch.cat(
                     [null_prompt_embeds, text_prompt_embeds], dim=0
                 )
+                #current_prompt_embeds = text_prompt_embeds
             else:
                 current_prompt_embeds = torch.cat(
                     [null_prompt_embeds, augmented_prompt_embeds], dim=0
                 )
+                #current_prompt_embeds = augmented_prompt_embeds
 
-
+            print(f"current_prompt_embeds.shape:{current_prompt_embeds.shape}")
             unet_added_cond_kwargs = {"text_embeds": pooled_prompt_embeds, "time_ids": add_time_ids}
-
+            
             # predict the noise residual
             noise_pred = self.unet(
                 latent_model_input,
@@ -604,7 +621,8 @@ def stable_diffusion_call_with_references_delayed_conditioning(
                 encoder_hidden_states=current_prompt_embeds,
                 cross_attention_kwargs=cross_attention_kwargs,
                 added_cond_kwargs=unet_added_cond_kwargs,
-            ).sample
+                return_dict=False,
+            )[0]
 
             # perform guidance
             if do_classifier_free_guidance:
@@ -617,8 +635,8 @@ def stable_diffusion_call_with_references_delayed_conditioning(
 
             # compute the previous noisy sample x_t -> x_t-1
             latents = self.scheduler.step(
-                noise_pred, t, latents, **extra_step_kwargs
-            ).prev_sample
+                noise_pred, t, latents, **extra_step_kwargs, return_dict=False)[0]
+            #).prev_sample
 
             # call the callback, if provided
             if i == len(timesteps) - 1 or (
@@ -637,13 +655,19 @@ def stable_diffusion_call_with_references_delayed_conditioning(
         #image = self.decode_latents(latents)
 
 
-        latents = 1 / self.vae.config.scaling_factor * latents
-        image = self.vae.decode(latents, return_dict=False)[0]
+        #latents = 1 / self.vae.config.scaling_factor * latents
+        #image = self.vae.decode(latents, return_dict=False)[0]
         #image = (image / 2 + 0.5).clamp(0, 1)
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
         #image = image.cpu().permute(0, 2, 3, 1).float().numpy()
         #return image
 
+
+        latents = 1 / self.vae.config.scaling_factor * latents
+        image = self.vae.decode(latents, return_dict=False)[0]
+        image = (image / 2 + 0.5).clamp(0, 1)
+        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
+        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
       
         # 9. Run safety checker
@@ -664,14 +688,16 @@ def stable_diffusion_call_with_references_delayed_conditioning(
         '''
 
         # 10. Convert to PIL
-        #image = self.numpy_to_pil(image)
-        image = self.image_processor.postprocess(image, output_type=output_type)
+        image = self.numpy_to_pil(image)
+        print(f"len:{len(image)}")
+        image[0].save("test.jpg")
+        #image = self.image_processor.postprocess(image, output_type=output_type)
 
     else:
         # 8. Post-processing
         #image = self.decode_latents(latents)
-        latents = 1 / self.vae.config.scaling_factor * latents
-        image = self.vae.decode(latents, return_dict=False)[0]
+        #latents = 1 / self.vae.config.scaling_factor * latents
+        #image = self.vae.decode(latents, return_dict=False)[0]
         #image = (image / 2 + 0.5).clamp(0, 1)
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
         #image = image.cpu().permute(0, 2, 3, 1).float().numpy()
@@ -687,6 +713,11 @@ def stable_diffusion_call_with_references_delayed_conditioning(
             clip_input=safety_checker_input.pixel_values.to(torch.float16),
         )
         '''
+        latents = 1 / self.vae.config.scaling_factor * latents
+        image = self.vae.decode(latents, return_dict=False)[0]
+        image = (image / 2 + 0.5).clamp(0, 1)
+        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
+        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
 
     # Offload last model to CPU
     if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:

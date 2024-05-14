@@ -11,6 +11,9 @@ from transformers.models.clip.modeling_clip import (
     CLIPPreTrainedModel,
     CLIPModel,
 )
+from transformers.modeling_utils import (
+    PreTrainedModel
+)
 
 import types
 import torchvision.transforms as T
@@ -188,8 +191,19 @@ class FastComposerPostfuseModule(nn.Module):
         return text_object_embeds
 
 
-class FastComposerTextEncoder(CLIPPreTrainedModel):
-    _build_causal_attention_mask = CLIPTextTransformer._build_causal_attention_mask
+class FastComposerTextEncoder(CLIPPreTrainedModel,PreTrainedModel):
+    #_build_causal_attention_mask = CLIPTextTransformer._build_causal_attention_mask
+    
+    def build_causal_attention_mask(self,bsz, seq_len, dtype):
+        # lazily create causal attention mask, with full attention between the vision tokens
+        # pytorch uses additive attention mask; fill with -inf
+        mask = torch.empty(bsz, seq_len, seq_len, dtype=dtype)
+        mask.fill_(torch.tensor(torch.finfo(dtype).min))
+        mask.triu_(1)  # zero out the lower diagonal
+        mask = mask.unsqueeze(1)  # expand mask
+        return mask
+
+    _build_causal_attention_mask = build_causal_attention_mask
 
     @staticmethod
     def from_pretrained(model_name_or_path, **kwargs):
@@ -235,9 +249,10 @@ class FastComposerTextEncoder(CLIPPreTrainedModel):
         hidden_states = self.embeddings(input_ids)
 
         bsz, seq_len = input_shape
-        causal_attention_mask = self._build_causal_attention_mask(
+        causal_attention_mask = self.build_causal_attention_mask(
             bsz, seq_len, hidden_states.dtype
-        ).to(hidden_states.device)
+        )
+        causal_attention_mask=causal_attention_mask.to(hidden_states.device)
 
         # expand attention_mask
         if attention_mask is not None:
@@ -588,7 +603,6 @@ class FastComposerModel(nn.Module):
         print(f"original_size:{original_size},crop_coords_top_left:{crop_coords_top_left},target_size:{target_size}")
 
 
-
         add_time_ids = [
             batch["original_size"].to(latents.device),
             batch["target_size"].to(latents.device),
@@ -597,7 +611,8 @@ class FastComposerModel(nn.Module):
         #print(f"test,00,add_time_ids.shape:{add_time_ids.shape}")
         add_time_ids = torch.cat(add_time_ids, dim=1).to(latents.device,dtype=torch.float16)
         print(f"test,11,add_time_ids.shape:{add_time_ids.shape}")
-        
+
+
 
         print(f"test,11,encoder_hidden_states.shape:{encoder_hidden_states.shape}")
         print(f"test,11,pooled_text_embeds.shape:{pooled_text_embeds.shape}")

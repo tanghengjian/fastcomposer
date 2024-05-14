@@ -6,7 +6,8 @@ DEMO_NAME="man_woman"
 #finetuned_model_path_name="model/fastcomposer"
 #finetuned_model_path_name="models/stable-diffusion-v1-5/train_test"
 #--pretrained_model_name_or_path model/runwayml/stable-diffusion-v1-5 \
-finetuned_model_path_name="models/YamerMIX_v8/train_test/postfuse-localize-ffhq-1_5-1e-5/checkpoint-15000"
+#finetuned_model_path_name="models/YamerMIX_v8/train_test/postfuse-localize-ffhq-1_5-1e-5/checkpoint-15000"
+finetuned_model_path_name="models/YamerMIX_v8/train_test/sdxl/checkpoint-400"
 CUDA_VISIBLE_DEVICES=0 accelerate launch \
     --mixed_precision=fp16 \
     fastcomposer/inference.py \
